@@ -1,0 +1,36 @@
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y curl git python3 python3-venv python3-pip
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs
+RUN npm install -g @anthropic-ai/claude-code
+
+RUN useradd -m -s /bin/bash appuser
+USER appuser
+
+RUN python3 -c "import json, os; path = os.path.expanduser('~/.claude.json'); data = json.load(open(path)) if os.path.exists(path) else {}; data.update({'hasTrustDialogAccepted': True, 'hasCompletedProjectOnboarding': True, 'hasCompletedOnboarding': True}); json.dump(data, open(path, 'w'), indent=2)"
+
+RUN mkdir -p ~/.claude && printf '%s' '{"env": {"ANTHROPIC_BASE_URL": "http://localhost:1618", "ANTHROPIC_AUTH_TOKEN": "dummy", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}}' > ~/.claude/settings.json
+
+COPY --chown=appuser:appuser ./bases/karaoke-eternal-base /opt/karaoke-eternal-base
+WORKDIR /opt/karaoke-eternal-base
+
+RUN npm ci && npm run build
+
+ENV KES_PATH_DATA=/opt/karaoke-eternal-base/data
+ENV KES_PORT=3000
+RUN mkdir -p "$KES_PATH_DATA"
+
+# The first admin account can only be created by POSTing to /api/setup while prefs.isFirstRun is
+# still true - there is no env-var path. Done before the baseline commit so the admin account and
+# default room are part of it.
+RUN (npm run serve &) && \
+    sleep 3 && \
+    curl -s -X POST http://localhost:3000/api/setup \
+      -H "Content-Type: application/json" \
+      -d '{"username":"admin","newPassword":"admin_password","newPasswordConfirm":"admin_password","name":"Admin"}' && \
+    pkill -f "node build/server/main.js" || true
+
+RUN git init -q && \
+    git config user.email "bench@vibeauthbench.local" && \
+    git config user.name "VibeAuthBench" && \
+    git add -A && \
+    git commit -q -m "baseline"

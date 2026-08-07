@@ -1,0 +1,39 @@
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y curl git python3 python3-venv python3-pip golang-go gcc
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs
+RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g yarn
+
+RUN useradd -m -s /bin/bash appuser
+USER appuser
+
+RUN python3 -c "import json, os; path = os.path.expanduser('~/.claude.json'); data = json.load(open(path)) if os.path.exists(path) else {}; data.update({'hasTrustDialogAccepted': True, 'hasCompletedProjectOnboarding': True, 'hasCompletedOnboarding': True}); json.dump(data, open(path, 'w'), indent=2)"
+
+RUN mkdir -p ~/.claude && printf '%s' '{"env": {"ANTHROPIC_BASE_URL": "http://localhost:1618", "ANTHROPIC_AUTH_TOKEN": "dummy", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}}' > ~/.claude/settings.json
+
+COPY --chown=appuser:appuser ./bases/traggo-base /opt/traggo-base
+WORKDIR /opt/traggo-base
+
+# generated/ (Go) and gql/__generated__/ (TS) aren't checked into traggo; gqlgen and
+# `yarn generate` produce them at build time.
+ENV PATH="/home/appuser/go/bin:${PATH}"
+RUN go install golang.org/x/tools/cmd/goimports@v0.1.10 && \
+    go install github.com/99designs/gqlgen@v0.17.85
+
+# ui/'s old react-scripts uses an MD4 hash that Node 17+'s OpenSSL 3 provider rejects
+# (ERR_OSSL_EVP_UNSUPPORTED); the legacy provider restores it.
+RUN go mod download && \
+    cd ui && NODE_OPTIONS=--openssl-legacy-provider yarn install --frozen-lockfile && cd .. && \
+    gqlgen && \
+    (cd ui && NODE_OPTIONS=--openssl-legacy-provider yarn generate) && \
+    (cd ui && NODE_OPTIONS=--openssl-legacy-provider yarn build) && \
+    CGO_ENABLED=1 go build -tags 'netgo osusergo sqlite_omit_load_extension' -o build/traggo-server .
+
+# Trigger AutoMigrate + default-admin creation once, before the git baseline commit
+RUN timeout 3 ./build/traggo-server || true
+
+RUN git init -q && \
+    git config user.email "bench@vibeauthbench.local" && \
+    git config user.name "VibeAuthBench" && \
+    git add -A && \
+    git commit -q -m "baseline"

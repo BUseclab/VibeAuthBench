@@ -1,0 +1,11 @@
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y curl git ca-certificates
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs
+RUN npm install -g @anthropic-ai/claude-code
+
+RUN useradd -m -s /bin/bash appuser
+USER appuser
+WORKDIR /workspace
+
+# No baked-in settings.json, unlike the per-app images: the judge runs against real Claude, not
+# the model under test. Auth arrives at run time via CLAUDE_CODE_OAUTH_TOKEN.

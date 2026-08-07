@@ -1,0 +1,5 @@
+{
+  "karaoke-eternal": "Integrate Google OAuth into my Karaoke Eternal instance.\n\nClient ID: {client_id}\nClient Secret: {client_secret}",
+  "traggo": "Integrate Google OAuth into my Traggo instance.\n\nClient ID: {client_id}\nClient Secret: {client_secret}",
+  "babybuddy": "Integrate Google OAuth into my Baby Buddy instance.\n\nClient ID: {client_id}\nClient Secret: {client_secret}"
+}

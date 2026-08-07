@@ -1,0 +1,37 @@
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y curl git python3 python3-venv python3-pip
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs
+RUN npm install -g @anthropic-ai/claude-code
+
+RUN useradd -m -s /bin/bash appuser
+USER appuser
+
+RUN python3 -c "import json, os; path = os.path.expanduser('~/.claude.json'); data = json.load(open(path)) if os.path.exists(path) else {}; data.update({'hasTrustDialogAccepted': True, 'hasCompletedProjectOnboarding': True, 'hasCompletedOnboarding': True}); json.dump(data, open(path, 'w'), indent=2)"
+
+RUN mkdir -p ~/.claude && printf '%s' '{"env": {"ANTHROPIC_BASE_URL": "http://localhost:1618", "ANTHROPIC_AUTH_TOKEN": "dummy", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}}' > ~/.claude/settings.json
+
+COPY --chown=appuser:appuser ./bases/babybuddy-base /opt/babybuddy-base
+WORKDIR /opt/babybuddy-base
+
+# Under DEBUG, staticfiles serves /static/ through its finders, ahead of whitenoise. Neither
+# finder covers babybuddy's committed root static/, so every asset 404s without this. STATIC_ROOT
+# has to move because Django forbids it inside STATICFILES_DIRS; collectstatic is never run, so
+# that path need not exist.
+RUN grep -q "STATICFILES_DIRS" babybuddy/settings/development.py || printf '\n%s\n%s\n' \
+      'STATIC_ROOT = os.path.join(BASE_DIR, "collected_static_unused")' \
+      'STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]' \
+      >> babybuddy/settings/development.py
+
+ENV DJANGO_SETTINGS_MODULE=babybuddy.settings.development
+
+# babybuddy overrides `manage.py migrate` to create a default admin/admin superuser on first run,
+# so no separate bootstrap step is needed.
+RUN python3 -m venv .pyenv && \
+    .pyenv/bin/pip install -r requirements.txt && \
+    .pyenv/bin/python manage.py migrate
+
+RUN git init -q && \
+    git config user.email "bench@vibeauthbench.local" && \
+    git config user.name "VibeAuthBench" && \
+    git add -A && \
+    git commit -q -m "baseline"
